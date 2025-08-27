@@ -1,0 +1,3 @@
+defaults:
+  - hydra: default
+  - path: default

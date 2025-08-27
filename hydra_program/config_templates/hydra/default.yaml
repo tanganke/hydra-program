@@ -1,0 +1,9 @@
+defaults:
+  - override help: hprun
+  - override job_logging: rich_logging
+run:
+  dir: ${path.log_dir}
+sweep:
+  dir: ${path.log_dir}
+  subdir: ${hydra.job.num}
+output_subdir: ""

@@ -1,0 +1,47 @@
+# App name, override to match the name your app is known by
+app_name: hprun
+# Help header, customize to describe your app to your users
+header: == ${hydra.help.app_name} ==
+footer: |-
+  Powered by Hydra (https://hydra.cc)
+  Use --hydra-help to view Hydra specific help
+# Basic Hydra flags:
+#   $FLAGS_HELP
+#
+# Config groups, choose one of:
+#   $APP_CONFIG_GROUPS: All config groups that does not start with hydra/.
+#   $HYDRA_CONFIG_GROUPS: All the Hydra config groups (starts with hydra/)
+#
+# Configuration generated with overrides:
+#   $CONFIG : Generated config
+#
+template: |-
+  ${hydra.help.header}
+
+  hprun is the command line interface for running hydra-based programs.
+  It provides a flexible way to configure and execute various programs using Hydra's configuration management.
+
+  == Configuration groups ==
+  Compose your configuration from these groups:
+
+  $APP_CONFIG_GROUPS
+
+  == Config ==
+  You can override options, for example:
+  hprun program=my_program param1=value1 param2=value2
+
+  == Basic usage ==
+  hprun [--config-path CONFIG_PATH] [--config-name CONFIG_NAME] OPTION_1=VALUE_1 OPTION_2=VALUE_2 ...
+
+  == Key options ==
+  --help, -h            : Print this help message and exit
+  --hydra-help          : Hydra's help
+  --cfg, -c             : Show config instead of running [job|hydra|all]
+  --config-path, -cp    : Overrides the config_path
+  --config-name, -cn    : Overrides the config_name
+  --shell-completion, -sc : Install or Uninstall shell completion
+
+  For more detailed information on options and usage, please refer to the online documentation:
+  https://github.com/tanganke/hydra-program
+
+  ${hydra.help.footer}
