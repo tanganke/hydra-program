@@ -19,6 +19,7 @@ Issues = "https://github.com/tanganke/hydra-program/issues"
 
 [project.scripts]
 hprun = "hydra_program.cli.hprun:main"
+hpinit = "hydra_program.cli.hpinit:main"
 
 [tool.isort]
 profile = "black"
