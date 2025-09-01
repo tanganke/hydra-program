@@ -10,7 +10,17 @@ version = "0.1.1"
 authors = [{ name = "Anke Tang", email = "tang.anke@foxmail.com" }]
 license-files = ["LICENSE"]
 requires-python = ">= 3.9"
-dependencies = ["hydra-core", "rich"]
+dependencies = ["hydra-core", "rich", "bidict"]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov", "black", "isort", "flake8", "mypy"]
+docs = [
+    "sphinx",
+    "sphinx_rtd_theme",
+    "sphinx-autodoc-typehints",
+    "myst-parser",
+    "sphinx-autobuild",
+]
 
 [project.urls]
 Repository = "https://github.com/tanganke/hydra-program"

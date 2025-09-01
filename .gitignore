@@ -1,5 +1,8 @@
 /config
 /outputs
+# Sphinx documentation build output
+docs/build/
+docs/source/_build/
 
 !*.template
 

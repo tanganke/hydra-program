@@ -1,0 +1,54 @@
+/* Custom styles for Hydra-Program documentation */
+
+/* Improve code block styling */
+.highlight {
+    margin: 1em 0;
+}
+
+/* Style for admonitions */
+.admonition {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 3px solid #ccc;
+    background-color: #f8f9fa;
+}
+
+.admonition.note {
+    border-left-color: #007bff;
+}
+
+.admonition.warning {
+    border-left-color: #ffc107;
+}
+
+.admonition.danger {
+    border-left-color: #dc3545;
+}
+
+/* Improve table styling */
+table.docutils {
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+table.docutils th,
+table.docutils td {
+    border: 1px solid #ddd;
+    padding: 0.5em;
+}
+
+table.docutils th {
+    background-color: #f8f9fa;
+    font-weight: bold;
+}
+
+/* Improve navigation */
+.wy-nav-content {
+    max-width: none;
+}
+
+@media screen and (min-width: 1400px) {
+    .wy-nav-content {
+        max-width: 1200px;
+    }
+}
