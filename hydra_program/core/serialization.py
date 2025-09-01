@@ -1,0 +1,313 @@
+import inspect
+import logging
+from copy import deepcopy
+from functools import wraps
+from inspect import Parameter, _ParameterKind
+from pathlib import Path
+from typing import Dict, Mapping, Optional, Union
+
+from bidict import MutableBidict, bidict
+from hydra.utils import instantiate
+from omegaconf import DictConfig, OmegaConf
+
+from .utils import import_object
+
+log = logging.getLogger(__name__)
+
+__all__ = [
+    "auto_register_config",
+    "YAMLSerializationMixin",
+]
+
+
+def _set_attr(self, param_name: str, value):
+    """
+    Set an attribute on the object using the parameter name from config mapping.
+
+    This function looks up the corresponding attribute name for the given parameter
+    name using the object's _config_mapping, then sets that attribute to the
+    specified value. It also logs the operation for debugging purposes.
+
+    Args:
+        self: The object instance to set the attribute on.
+        param_name (str): The parameter name (config key) to map to an attribute.
+        value: The value to assign to the attribute.
+
+    Raises:
+        ValueError: If the parameter name is not found in the config mapping.
+
+    Example:
+        ```python
+        >>> # Assuming self._config_mapping = {"learning_rate": "lr"}
+        >>> _set_attr(self, "lr", 0.001)
+        >>> # This sets self.learning_rate = 0.001
+        ```
+    """
+    attr_name = self._config_mapping.inverse["param_name"]
+    log.debug(f"set {attr_name} to {value}. Parameter name: {param_name}")
+    setattr(self, attr_name, value)
+
+
+def auto_register_config(cls):
+    """
+    Decorator to automatically register __init__ parameters in _config_mapping.
+
+    This decorator enhances classes that inherit from YAMLSerializationMixin by
+    automatically mapping constructor parameters to configuration keys and
+    dynamically setting instance attributes based on provided arguments.
+
+    The decorator performs the following operations:
+    1. Inspects the class's __init__ method signature
+    2. Automatically populates the _config_mapping dictionary with parameter names
+    3. Wraps the __init__ method to handle both positional and keyword arguments
+    4. Sets instance attributes for all constructor parameters
+    5. Applies default values when parameters are not provided
+
+    Args:
+        cls (YAMLSerializationMixin): The class to be decorated. Must inherit from
+            YAMLSerializationMixin to ensure proper serialization capabilities.
+
+    Returns:
+        YAMLSerializationMixin: The decorated class with enhanced auto-registration
+            functionality and modified __init__ behavior.
+
+    Behavior:
+        - **Parameter Registration**: All non-variadic parameters (excluding *args, **kwargs)
+          from the __init__ method are automatically added to _config_mapping
+        - **Positional Arguments**: Handled in order and mapped to corresponding parameter names
+        - **Keyword Arguments**: Processed after positional arguments, overriding any conflicts
+        - **Default Values**: Applied when parameters are not provided via arguments
+        - **Attribute Setting**: All parameters become instance attributes accessible via dot notation
+
+    Example:
+        ```python
+        @auto_register_config
+        class MyAlgorithm(BaseYAMLSerializable):
+            def __init__(self, learning_rate: float = 0.001, batch_size: int = 32, model_name: str = "default"):
+                super().__init__()
+
+        # All instantiation methods work automatically:
+        algo1 = MyAlgorithm(0.01, 64)  # positional args
+        algo2 = MyAlgorithm(learning_rate=0.01, model_name="bert")  # keyword args
+        algo3 = MyAlgorithm(0.01, batch_size=128, model_name="gpt")  # mixed args
+
+        # Attributes are automatically set and can be serialized:
+        print(algo1.learning_rate)  # 0.01
+        print(algo1.batch_size)     # 64
+        print(algo1.model_name)     # "default" (from default value)
+
+        config = algo1.config
+        # DictConfig({'_target_': 'MyAlgorithm', 'learning_rate': 0.01, 'batch_size': 64, 'model_name': 'default'})
+        ```
+
+    Note:
+        - The decorator wraps the original __init__ method while preserving its signature for IDE support
+        - Parameters with *args or **kwargs signatures are ignored during registration
+        - The attributes are auto-registered, then the original __init__ method is called,
+        - Type hints, method name, and other metadata are preserved using functools.wraps
+        - This decorator is designed to work seamlessly with the YAML serialization system
+
+    Raises:
+        AttributeError: If the class does not have the required _config_mapping attribute
+            infrastructure (should inherit from YAMLSerializationMixin)
+    """
+    original_init = cls.__init__
+    sig = inspect.signature(original_init)
+
+    # Auto-register parameters in _config_mapping
+    if not "_config_mapping" in cls.__dict__:
+        cls._config_mapping = deepcopy(getattr(cls, "_config_mapping", bidict()))
+    if not isinstance(cls._config_mapping, bidict):
+        cls._config_mapping = bidict(cls._config_mapping)
+
+    registered_parameters = tuple(cls._config_mapping.values())
+
+    for param_name in list(sig.parameters.keys())[1:]:  # Skip 'self'
+        if (
+            sig.parameters[param_name].kind
+            not in [
+                _ParameterKind.VAR_POSITIONAL,
+                _ParameterKind.VAR_KEYWORD,
+            ]
+        ) and (param_name not in registered_parameters):
+            cls._config_mapping[param_name] = param_name
+
+    @wraps(original_init)
+    def __init__(self, *args, **kwargs):
+        log.debug(f"set attributes for {self.__class__.__name__} in {cls.__name__}")
+        # auto-register the attributes based on the signature
+        sig = inspect.signature(original_init)
+        param_names = list(sig.parameters.keys())[1:]  # Skip 'self'
+
+        # Handle positional arguments
+        for i, arg_value in enumerate(args):
+            if i < len(param_names):
+                param_name = param_names[i]
+                if sig.parameters[param_name].kind not in [
+                    _ParameterKind.VAR_POSITIONAL,
+                    _ParameterKind.VAR_KEYWORD,
+                ]:
+                    _set_attr(self, param_name, arg_value)
+
+        # Handle keyword arguments and defaults
+        for param_name in param_names:
+            if sig.parameters[param_name].kind not in [
+                _ParameterKind.VAR_POSITIONAL,
+                _ParameterKind.VAR_KEYWORD,
+            ]:
+                # Skip if already set by positional argument
+                param_index = param_names.index(param_name)
+                if param_index >= 0 and param_index < len(args):
+                    continue
+
+                if param_name in kwargs:
+                    _set_attr(self, param_name, kwargs[param_name])
+                else:
+                    # Set default value if available and attribute doesn't exist
+                    default_value = sig.parameters[param_name].default
+                    if default_value is not Parameter.empty:
+                        _set_attr(self, param_name, default_value)
+
+        # Call the original __init__
+        result = original_init(self, *args, **kwargs)
+        return result
+
+    # Replace the original __init__ method while preserving its signature
+    cls.__init__ = __init__
+    return cls
+
+
+class YAMLSerializationMixin:
+    _config_key: Optional[str] = None
+    _config_mapping: MutableBidict[str, str] = bidict()
+    R"""
+    `_config_mapping` is a dictionary mapping the attribute names of the class to the config option names. This is used to convert the class to a DictConfig.
+
+    For example, if an algorithm class is defined as follows:
+    
+    ```python
+    class SomeModelFusionAlgorithm(BaseModelFusionAlgorithm):
+        hyper_parameter_1 = None
+        hyper_parameter_2 = None
+
+        _config_mapping = BaseModelFusionAlgorithm._config_mapping | {
+            "hyper_parameter_1" : "hyper_param_1",
+            "hyper_parameter_2" : "hyper_param_2",
+        }
+        def __init__(self, hyper_param_1: int, hyper_param_2: int):
+            self.hyper_parameter_1 = hyper_param_1
+            self.hyper_parameter_2 = hyper_param_2
+            super().__init__()
+    ```
+
+    The model pool will be converted to a DictConfig as follows:
+        
+    ```python
+    algorithm = SomeModelFusionAlgorithm(hyper_param_1=1, hyper_param_2=2)
+    ```
+
+    >>> algorithm.config
+        DictCOnfig({'_target_': 'SomeModelFusionAlgorithm', 'hyper_param_1': 1, 'hyper_param_2': 2})
+
+    By default, the `_target_` key is set to the class name as `type(self).__name__`.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        for key, value in kwargs.items():
+            log.warning(f"Unused argument: {key}={value}")
+
+    @property
+    def config(self) -> DictConfig:
+        R"""
+        Returns the configuration of the model pool as a DictConfig.
+
+        This property converts the model pool instance into a dictionary
+        configuration, which can be used for serialization or other purposes.
+
+        Example:
+
+        ```python
+        model = SomeModelFusionAlgorithm(hyper_param_1=1, hyper_param_2=2)
+        config = model.config
+        print(config)
+        # DictConfig({'_target_': 'SomeModelFusionAlgorithm', 'hyper_param_1': 1, 'hyper_param_2': 2})
+        ```
+
+        This is useful for serializing the object to a YAML file or for debugging.
+
+        Returns:
+            DictConfig: The configuration of the model pool.
+        """
+        config = {"_target_": f"{type(self).__module__}.{type(self).__qualname__}"}
+        for attr, key in self._config_mapping.items():
+            if hasattr(self, attr):
+                config[key] = getattr(self, attr)
+
+        try:
+            return OmegaConf.create(config)
+        except Exception as e:
+            return OmegaConf.create(config, flags={"allow_objects": True})
+
+    def to_yaml(self, path: Union[str, Path], resolve: bool = True):
+        """
+        Save the model pool to a YAML file.
+
+        Args:
+            path (Union[str, Path]): The path to save the model pool to.
+        """
+        OmegaConf.save(self.config, path, resolve=resolve)
+
+    @classmethod
+    def from_yaml(cls, path: Union[str, Path]):
+        """
+        Load a model pool from a YAML file.
+
+        Args:
+            path (Union[str, Path]): The path to load the model pool from.
+
+        Returns:
+            BaseModelPool: The loaded model pool.
+        """
+        config = OmegaConf.load(path)
+        if cls._config_key is not None and cls._config_key in config:
+            config = config[cls._config_key]
+        target_cls = import_object(config["_target_"])
+        if target_cls != cls:
+            log.warning(
+                f"The class {target_cls.__name__} is not the same as the class {cls.__name__}. "
+                f"Instantiating the class {target_cls.__name__} instead."
+            )
+        return instantiate(config)
+
+    def register_parameter_to_config(
+        self,
+        attr_name: str,
+        param_name: str,
+        value,
+    ):
+        """
+        Set an attribute value and register its config mapping.
+
+        This method allows dynamic setting of object attributes while simultaneously
+        updating the configuration mapping that defines how the attribute should
+        be serialized in the configuration output.
+
+        Args:
+            attr_name (str): The name of the attribute to set on this object.
+            arg_name (str): The corresponding parameter name to use in the config
+                serialization. This is how the attribute will appear in YAML output.
+            value: The value to assign to the attribute.
+
+        Example:
+            ```python
+            model = BaseYAMLSerializable()
+            model.set_option("learning_rate", "lr", 0.001)
+
+            # This sets model.learning_rate = 0.001
+            # and maps it to "lr" in the config output
+            config = model.config
+            # config will contain: {"lr": 0.001, ...}
+            ```
+        """
+        setattr(self, attr_name, value)
+        self._config_mapping[attr_name] = param_name

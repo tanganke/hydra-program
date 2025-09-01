@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 
 def _get_default_config_path():
-    for config_dir in ["config"]:
+    for config_dir in ["config", "configs"]:
         for config_path_root in [os.getcwd()]:
             config_path = os.path.join(config_path_root, config_dir)
             if os.path.exists(config_path) and os.path.isdir(config_path):
