@@ -50,15 +50,6 @@ def main(cfg: DictConfig) -> None:
         None: This function doesn't return a value but executes the hydra
             program which may save results, log outputs, or perform other
             side effects as configured.
-
-    Example:
-        This function is typically called automatically when running:
-        ```bash
-        hprun program=...
-        ```
-
-        The Hydra decorator handles parsing these command-line arguments and
-        loading the corresponding configuration files to populate the cfg parameter.
     """
     OmegaConf.resolve(cfg)
     program = instantiate(cfg)
